@@ -1,0 +1,88 @@
+<!doctype html><html lang="en"><head><title>My attendance · Attendee</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>body{font-family:Manrope,system-ui,sans-serif;background:#F3F6F8;color:#12263A}
+:focus-visible{outline:3px solid #0E7C86;outline-offset:2px}
+.st-Present{background:#DDF3E4;color:#14532D}.st-Late{background:#FFF0CC;color:#7A4B00}
+.st-Absent{background:#FDE0DC;color:#8A1C12}.st-OnLeave{background:#DCE8FB;color:#173B7A}
+.st-Notmarked,.st-Notmarkedyet{background:#E6EBEF;color:#44566A}</style></head>
+<body>
+<header class="flex items-center justify-between px-5 py-4 max-w-3xl mx-auto">
+  <span class="font-extrabold text-xl">Attendee</span>
+  <button id="out" class="text-sm font-bold underline">Sign out</button>
+</header>
+<main class="max-w-3xl mx-auto px-5 pb-10">
+  <p id="clock" class="text-slate-600 font-medium">&nbsp;</p>
+  <h1 id="name" class="text-3xl sm:text-4xl font-extrabold mt-1">Loading…</h1>
+  <p id="role" class="text-slate-600"></p>
+
+  <section class="mt-8 bg-white rounded-2xl p-6 shadow-sm">
+    <h2 class="text-sm font-bold text-slate-600">Today's status</h2>
+    <span id="status" class="inline-block mt-2 rounded-full px-5 py-2 text-2xl font-extrabold">…</span>
+    <p id="lateBy" class="mt-2 font-bold text-amber-800"></p>
+
+    <dl class="mt-5 grid grid-cols-3 gap-3 text-center">
+      <div class="rounded-xl bg-slate-50 p-3"><dt class="text-xs font-bold text-slate-600">In</dt><dd id="tIn" class="text-lg font-extrabold">–</dd></div>
+      <div class="rounded-xl bg-slate-50 p-3"><dt class="text-xs font-bold text-slate-600">Out</dt><dd id="tOut" class="text-lg font-extrabold">–</dd></div>
+      <div class="rounded-xl bg-slate-50 p-3"><dt class="text-xs font-bold text-slate-600">Hours worked</dt><dd id="tWorked" class="text-lg font-extrabold">–</dd></div>
+    </dl>
+
+    <div class="mt-5 flex flex-wrap gap-3">
+      <button id="btnIn" class="hidden rounded-lg bg-[#0E7C86] text-white font-bold px-6 py-3 hover:bg-[#0B6870]">Check in</button>
+      <button id="btnOut" class="hidden rounded-lg bg-[#12263A] text-white font-bold px-6 py-3 hover:bg-black">Check out</button>
+    </div>
+    <p id="note" role="status" class="mt-3 text-sm text-slate-600"></p>
+  </section>
+
+  <section class="mt-4 bg-white rounded-2xl p-6 shadow-sm">
+    <h2 class="text-sm font-bold text-slate-600">Your workplace</h2>
+    <p id="loc" class="mt-1 text-xl font-bold"></p>
+    <p id="dept" class="text-slate-600"></p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const t12 = hm => { if (!hm) return '–'; const [h, m] = hm.split(':').map(Number); return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); };
+const dur = m => { const h = Math.floor(m / 60), mm = m % 60; return (h ? h + ' h ' : '') + mm + ' min'; };
+const toMin = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
+
+function tick(){ $('clock').textContent = new Date().toLocaleString('en-US',
+  {weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'numeric', minute:'2-digit', second:'2-digit'}); }
+tick(); setInterval(tick, 1000);
+
+let lateAfter = '09:30';
+function show(d){
+  $('status').textContent = d.status;
+  $('status').className = 'inline-block mt-2 rounded-full px-5 py-2 text-2xl font-extrabold st-' + d.status.replace(/\s/g, '');
+  $('lateBy').textContent = d.status === 'Late' ? 'You were ' + dur(d.late_minutes) + ' late.' : '';
+  $('tIn').textContent = t12(d.check_in);
+  $('tOut').textContent = t12(d.check_out);
+  $('tWorked').textContent = d.check_in && d.check_out ? dur(Math.max(0, toMin(d.check_out) - toMin(d.check_in))) : '–';
+  const unmarked = d.status === 'Not marked yet', canOut = d.check_in && !d.check_out;
+  $('btnIn').classList.toggle('hidden', !unmarked);
+  $('btnOut').classList.toggle('hidden', !canOut);
+  $('note').textContent = unmarked ? 'Check in when you arrive. Checking in after ' + t12(lateAfter) + ' counts as late.'
+    : canOut ? 'Remember to check out when you leave.' : d.check_out ? 'Your day is complete.' : '';
+}
+let cur = {};
+function load(){
+  return fetch('/api/worker/today').then(r => r.status === 401 || r.status === 403 ? (location.href = '/') : r.json()).then(d => {
+    if (!d) return;
+    lateAfter = d.late_after; cur = d;
+    $('name').textContent = d.name; $('role').textContent = d.job_title;
+    $('loc').textContent = d.location; $('dept').textContent = d.department + ' department';
+    show(d);
+  });
+}
+async function post(url, btn){
+  btn.disabled = true;
+  const r = await fetch(url, {method:'POST'}); const d = await r.json();
+  btn.disabled = false;
+  if (d.error) { $('note').textContent = d.error; return; }
+  await load();
+}
+$('btnIn').onclick = () => post('/api/worker/checkin', $('btnIn'));
+$('btnOut').onclick = () => post('/api/worker/checkout', $('btnOut'));
+$('out').onclick = async () => { await fetch('/api/logout', {method:'POST'}); location.href = '/'; };
+load();
+</script></body></html>

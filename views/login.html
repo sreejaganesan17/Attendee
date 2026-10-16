@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><title>Sign in · Attendee</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>body{font-family:Manrope,system-ui,sans-serif;background:#F3F6F8;color:#12263A}
+:focus-visible{outline:3px solid #0E7C86;outline-offset:2px}
+.st-Present{background:#DDF3E4;color:#14532D}.st-Late{background:#FFF0CC;color:#7A4B00}
+.st-Absent{background:#FDE0DC;color:#8A1C12}.st-OnLeave{background:#DCE8FB;color:#173B7A}
+.st-Notmarked,.st-Notmarkedyet{background:#E6EBEF;color:#44566A}</style></head>
+<body class="min-h-screen grid place-items-center p-4">
+<main class="w-full max-w-sm">
+  <h1 class="text-4xl font-extrabold tracking-tight">Attendee</h1>
+  <p class="mt-1 mb-6 text-slate-600">Sign in to see or record today's attendance.</p>
+  <form id="f" class="bg-white rounded-xl p-6 shadow-sm space-y-4">
+    <label class="block text-sm font-bold">Username
+      <input id="u" required autocomplete="username" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"></label>
+    <label class="block text-sm font-bold">Password
+      <input id="p" type="password" required autocomplete="current-password" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"></label>
+    <p id="err" role="alert" class="text-sm text-red-700 min-h-5"></p>
+    <button class="w-full rounded-lg bg-[#0E7C86] text-white font-bold py-2.5 hover:bg-[#0B6870]">Sign in</button>
+  </form>
+</main>
+<script>
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username: u.value, password: p.value})});
+  const d = await r.json();
+  r.ok ? location.href = d.redirect : err.textContent = d.error;
+});
+</script></body></html>

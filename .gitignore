@@ -1,0 +1,5 @@
+node_modules/
+attendee.db
+attendee.db-shm
+attendee.db-wal
+.env

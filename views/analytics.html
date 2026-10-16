@@ -1,0 +1,133 @@
+<!doctype html><html lang="en"><head><title>Analytics · Attendee</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>body{font-family:Manrope,system-ui,sans-serif;background:#F3F6F8;color:#12263A}
+:focus-visible{outline:3px solid #0E7C86;outline-offset:2px}
+.st-Present{background:#DDF3E4;color:#14532D}.st-Late{background:#FFF0CC;color:#7A4B00}
+.st-Absent{background:#FDE0DC;color:#8A1C12}.st-OnLeave{background:#DCE8FB;color:#173B7A}
+.st-Notmarked,.st-Notmarkedyet{background:#E6EBEF;color:#44566A}</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script></head>
+<body>
+<header class="flex items-center justify-between px-5 py-4 max-w-6xl mx-auto">
+  <span class="font-extrabold text-xl">Attendee <span class="font-medium text-slate-600">analytics</span></span>
+  <nav class="flex items-center gap-4 text-sm font-bold">
+    <a href="/hr" class="underline">Back to attendance</a>
+    <a href="/api/hr/export.csv" class="underline">Download attendance (CSV)</a>
+  </nav>
+</header>
+<main class="max-w-6xl mx-auto px-5 pb-12">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div><h1 class="text-3xl font-extrabold">Attendance patterns</h1>
+      <p id="range" class="text-slate-600"></p></div>
+    <label class="text-sm font-bold">Period
+      <select id="days" class="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal">
+        <option value="30">Last 30 days</option><option value="60">Last 60 days</option>
+        <option value="90" selected>Last 90 days</option><option value="180">Last 180 days</option></select></label>
+  </div>
+
+  <p id="empty" class="hidden mt-6 bg-white rounded-2xl p-6 shadow-sm text-slate-700">
+    No attendance records in this period yet. Mark some attendance first, or load practice data with
+    <code class="font-bold">npm run seed:history</code>.</p>
+
+  <div id="content" class="hidden">
+    <section id="kpis" class="mt-6 grid grid-cols-2 lg:grid-cols-5 gap-3"></section>
+
+    <section class="mt-6 bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="font-extrabold">What the data says</h2>
+      <ul id="insights" class="mt-2 space-y-1 text-slate-700 list-disc pl-5"></ul>
+    </section>
+
+    <section class="mt-4 bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="font-extrabold">Weekly trend</h2>
+      <p class="text-sm text-slate-600">Share of expected workdays attended, and share of attended days that were late.</p>
+      <div class="relative h-64 mt-3"><canvas id="cTrend"></canvas></div>
+    </section>
+
+    <div class="mt-4 grid gap-4 lg:grid-cols-2">
+      <section class="bg-white rounded-2xl p-5 shadow-sm"><h2 class="font-extrabold">By weekday</h2>
+        <div class="relative h-64 mt-3"><canvas id="cDay"></canvas></div></section>
+      <section class="bg-white rounded-2xl p-5 shadow-sm"><h2 class="font-extrabold">By department</h2>
+        <div class="relative h-64 mt-3"><canvas id="cDept"></canvas></div></section>
+      <section class="bg-white rounded-2xl p-5 shadow-sm lg:col-span-2"><h2 class="font-extrabold">By branch</h2>
+        <div class="relative h-56 mt-3"><canvas id="cLoc"></canvas></div></section>
+    </div>
+
+    <section class="mt-4 bg-white rounded-2xl shadow-sm overflow-x-auto">
+      <h2 class="font-extrabold p-5 pb-2">Employees to follow up with</h2>
+      <p class="px-5 text-sm text-slate-600">Ten people with the most late and absent days in this period.</p>
+      <table class="w-full text-left text-sm mt-2">
+        <thead class="bg-slate-50 text-slate-600"><tr><th class="p-3">Employee</th><th class="p-3">Department</th>
+          <th class="p-3">Branch</th><th class="p-3">Late days</th><th class="p-3">Total late time</th><th class="p-3">Absent days</th><th class="p-3">Attendance rate</th></tr></thead>
+        <tbody id="watch"></tbody></table>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const dur = m => m == null ? 'n/a' : (Math.floor(m / 60) ? Math.floor(m / 60) + ' h ' : '') + (m % 60) + ' min';
+const pct = v => v == null ? 'n/a' : (v * 100).toFixed(1) + '%';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const C = { teal:'#0E7C86', amber:'#D99A00', red:'#C2412D', blue:'#2F5FA8' };
+const charts = {};
+
+function rates(r){ const w = r.present + r.late, e = w + r.absent;
+  return { attendanceRate: e ? w/e : null, lateRate: w ? r.late/w : null, absenceRate: e ? r.absent/e : null }; }
+
+function weekly(daily){
+  const weeks = new Map();
+  for (const d of daily) {
+    const [y,m,dd] = d.date.split('-').map(Number), dt = new Date(y, m-1, dd);
+    dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));            // back to Monday
+    const k = dt.toLocaleDateString('en-CA');
+    const w = weeks.get(k) || { date:k, present:0, late:0, absent:0 };
+    w.present += d.present; w.late += d.late; w.absent += d.absent; weeks.set(k, w);
+  }
+  return [...weeks.values()].sort((a,b) => a.date.localeCompare(b.date)).map(w => ({ ...w, ...rates(w) }));
+}
+
+function draw(id, type, labels, sets, opts = {}){
+  charts[id]?.destroy();
+  charts[id] = new Chart($(id), { type, data: { labels, datasets: sets },
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'bottom' }, tooltip:{ callbacks:{ label: c => c.dataset.label + ': ' + c.parsed.y.toFixed(1) + '%' } } },
+      scales:{ y:{ beginAtZero:true, ticks:{ callback: v => v + '%' }, ...(opts.y || {}) } } } });
+}
+const ds = (label, rows, key, color, type) => ({ label, data: rows.map(r => r[key] == null ? null : +(r[key]*100).toFixed(2)),
+  backgroundColor: color, borderColor: color, tension: .25, pointRadius: type === 'line' ? 2 : 0 });
+function peak(rows, key){ return rows.filter(r => r[key] != null).sort((a,b) => b[key]-a[key])[0]; }
+
+async function load(){
+  const r = await fetch('/api/hr/analytics?days=' + $('days').value);
+  if (r.status === 401 || r.status === 403) return (location.href = '/');
+  const d = await r.json(), t = d.totals;
+  $('range').textContent = 'From ' + d.range.start + ' to ' + d.range.finish + ' · leave days are left out of attendance and absence rates';
+  const has = t.records > 0;
+  $('empty').classList.toggle('hidden', has); $('content').classList.toggle('hidden', !has);
+  if (!has) return;
+
+  const k = [['Attendance rate', pct(t.attendanceRate), 'st-Present'], ['Late rate', pct(t.lateRate), 'st-Late'],
+    ['Absence rate', pct(t.absenceRate), 'st-Absent'], ['Leave days', t.leave_days, 'st-OnLeave'], ['Average time late', dur(t.avgLateMinutes), 'st-Notmarked']];
+  $('kpis').innerHTML = k.map(([a,b,c]) => '<div class="rounded-xl p-4 '+c+'"><div class="text-3xl font-extrabold">'+b+'</div><div class="text-sm font-bold">'+a+'</div></div>').join('');
+
+  const wd = peak(d.weekday,'absenceRate'), wl = peak(d.weekday,'lateRate'), dl = peak(d.department,'lateRate'),
+        da = peak(d.department,'absenceRate'), ll = peak(d.location,'lateRate');
+  const lines = [];
+  if (wd) lines.push(wd.label + ' has the highest absence rate (' + pct(wd.absenceRate) + ').');
+  if (wl) lines.push(wl.label + ' has the highest late rate (' + pct(wl.lateRate) + ').');
+  if (dl) lines.push(dl.label + ' has the highest late rate among departments (' + pct(dl.lateRate) + ').');
+  if (da) lines.push(da.label + ' has the highest absence rate among departments (' + pct(da.absenceRate) + ').');
+  if (ll) lines.push(ll.label + ' has the highest late rate among branches (' + pct(ll.lateRate) + ').');
+  const top = d.watchlist[0];
+  if (top) lines.push(top.name + ' has the most late and absent days (' + top.late + ' late, ' + top.absent + ' absent).');
+  $('insights').innerHTML = lines.map(l => '<li>' + esc(l) + '</li>').join('');
+
+  const w = weekly(d.daily);
+  draw('cTrend', 'line', w.map(x => x.date), [ds('Attendance rate', w, 'attendanceRate', C.teal, 'line'), ds('Late rate', w, 'lateRate', C.amber, 'line')], { y:{ max:100 } });
+  const bars = (id, rows) => draw(id, 'bar', rows.map(x => x.label), [ds('Late rate', rows, 'lateRate', C.amber), ds('Absence rate', rows, 'absenceRate', C.red)]);
+  bars('cDay', d.weekday); bars('cDept', d.department); bars('cLoc', d.location);
+
+  $('watch').innerHTML = d.watchlist.map(e => '<tr class="border-t"><td class="p-3"><div class="font-bold">'+esc(e.name)+'</div><div class="text-slate-500">'+esc(e.username)+'</div></td>'
+    + '<td class="p-3">'+esc(e.department)+'</td><td class="p-3">'+esc(e.location)+'</td><td class="p-3 font-bold">'+e.late+'</td><td class="p-3">'+dur(e.late_minutes_total)+'</td><td class="p-3 font-bold">'+e.absent+'</td><td class="p-3">'+pct(e.attendanceRate)+'</td></tr>').join('');
+}
+$('days').onchange = load; load();
+</script></body></html>
